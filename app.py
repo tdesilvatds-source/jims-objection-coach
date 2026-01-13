@@ -1,14 +1,12 @@
 import streamlit as st
+from openai import OpenAI
 
-st.set_page_config(
-    page_title="Jim’s Objection Coach",
-    layout="centered"
-)
-
+st.set_page_config(page_title="Jim’s Objection Coach", layout="centered")
 st.title("🚗 Jim’s Franchise Objection Coach")
-st.caption("Instant answers for franchise sales objections")
+st.caption("Locked scripts first • AI fallback for new/odd objections")
 
-plays = {
+# --- Locked plays (your proven responses) ---
+PLAYS = {
     "Income / Money": {
         "phone": "Totally fair. Income here is effort-based, but the model is simple: consistent jobs, quality work, upsells and repeat customers. Early success comes from consistency, not perfection.",
         "sms": "Fair question. Income is effort-based but the model is proven — consistency early is key.",
@@ -44,19 +42,95 @@ plays = {
         "sms": "Is it upfront cost, early cashflow, or ROI that worries you?",
         "follow": "Which part is the biggest stress for you?",
         "next": "Break down cost vs realistic earning pathway."
-    }
+    },
 }
 
-choice = st.selectbox("Select the objection:", list(plays.keys()))
+# --- AI settings ---
+ai_enabled = st.toggle("Enable AI fallback for new objections", value=True)
+model_name = st.text_input("AI model", value="gpt-5.2")
 
-st.subheader("📞 Phone Response")
-st.write(plays[choice]["phone"])
+# Streamlit secrets: OPENAI_API_KEY
+api_key = st.secrets.get("OPENAI_API_KEY", None)
 
-st.subheader("💬 SMS Version")
-st.code(plays[choice]["sms"])
+# --- UI ---
+choice = st.selectbox("Select a known objection (locked script):", list(PLAYS.keys()))
+st.divider()
 
-st.subheader("❓ Follow-Up Question")
-st.write(plays[choice]["follow"])
+st.subheader("📞 Phone Response (Locked)")
+st.write(PLAYS[choice]["phone"])
 
-st.subheader("➡️ Next Step")
-st.write(plays[choice]["next"])
+st.subheader("💬 SMS Version (Locked)")
+st.code(PLAYS[choice]["sms"])
+
+st.subheader("❓ Follow-Up Question (Locked)")
+st.write(PLAYS[choice]["follow"])
+
+st.subheader("➡️ Next Step (Locked)")
+st.write(PLAYS[choice]["next"])
+
+st.divider()
+st.subheader("🤖 AI Fallback (for anything else)")
+
+objection_text = st.text_area(
+    "Paste/type the prospect’s exact objection here (or any weird/unique objection):",
+    placeholder="e.g. 'I’m worried I won’t get enough bookings in my area…'"
+)
+
+tone = st.selectbox("Tone", ["Straight-talking (AU)", "More supportive", "More assertive"])
+format_pref = st.selectbox("Output format", ["Phone + SMS + Follow-up + Next step", "Just SMS", "Just Phone talk track"])
+
+def generate_ai_response(objection: str) -> str:
+    # OpenAI Responses API (recommended for new projects) :contentReference[oaicite:2]{index=2}
+    client = OpenAI(api_key=api_key)
+    system_rules = (
+        "You are a franchise sales objection coach for Jim’s Car Detailing (Australia). "
+        "Write concise, ethical replies. No income guarantees. Keep it confident and practical."
+    )
+
+    instructions = f"""
+TONE: {tone}
+
+Given this objection from a franchise prospect:
+\"\"\"{objection}\"\"\"
+
+Return:
+- PHONE TALK TRACK (2–4 sentences)
+- SMS VERSION (1–2 sentences)
+- FOLLOW-UP QUESTION (1 sentence)
+- NEXT STEP (1 line)
+
+Constraints:
+- No hype or guarantees
+- Mention effort-based outcomes where relevant
+- Keep it simple and human
+"""
+
+    resp = client.responses.create(
+        model=model_name,
+        input=[
+            {"role": "system", "content": system_rules},
+            {"role": "user", "content": instructions},
+        ],
+    )
+    return resp.output_text
+
+if st.button("Generate AI response", type="primary"):
+    if not ai_enabled:
+        st.warning("AI fallback is turned OFF. Toggle it on above if you want AI replies.")
+    elif not objection_text.strip():
+        st.warning("Type/paste an objection first.")
+    elif not api_key:
+        st.error("No OPENAI_API_KEY found in Streamlit Secrets. Add it in Settings → Secrets.")
+    else:
+        with st.spinner("Generating…"):
+            try:
+                ai_out = generate_ai_response(objection_text.strip())
+                st.subheader("✅ AI Response")
+                if format_pref == "Just SMS":
+                    st.code(ai_out)
+                elif format_pref == "Just Phone talk track":
+                    st.write(ai_out)
+                else:
+                    st.write(ai_out)
+            except Exception as e:
+                st.error(f"AI request failed: {e}")
