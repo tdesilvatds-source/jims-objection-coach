@@ -1,7 +1,9 @@
-k = st.secrets.get("OPENAI_API_KEY", "")
-st.write("Key loaded:", bool(k), "Length:", len(k), "Prefix:", k[:7])
 import streamlit as st
 from openai import OpenAI
+
+k = st.secrets.get("OPENAI_API_KEY", "")
+st.write("Key loaded:", bool(k), "Length:", len(k), "Prefix:", k[:7])
+
 
 st.set_page_config(page_title="Jim’s Objection Coach", layout="centered")
 st.title("🚗 Jim’s Franchise Objection Coach")
@@ -136,4 +138,5 @@ if st.button("Generate AI response", type="primary"):
                     st.write(ai_out)
             except Exception as e:
                 st.error(f"AI request failed: {e}")
+
 
