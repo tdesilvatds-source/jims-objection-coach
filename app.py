@@ -1,21 +1,22 @@
 import streamlit as st
 from openai import OpenAI
 
-k = st.secrets.get("OPENAI_API_KEY", "")
-st.write("Key loaded:", bool(k), "Length:", len(k), "Prefix:", k[:7])
-
-
+# ---------------------------
+# Page setup
+# ---------------------------
 st.set_page_config(page_title="Jim’s Objection Coach", layout="centered")
 st.title("🚗 Jim’s Franchise Objection Coach")
-st.caption("Locked scripts first • AI fallback for new/odd objections")
+st.caption("Locked scripts first • AI fallback for new/unique objections")
 
-# --- Locked plays (your proven responses) ---
-PLAYS = {
+# ---------------------------
+# Locked scripts (always available)
+# ---------------------------
+LOCKED = {
     "Income / Money": {
         "phone": "Totally fair. Income here is effort-based, but the model is simple: consistent jobs, quality work, upsells and repeat customers. Early success comes from consistency, not perfection.",
         "sms": "Fair question. Income is effort-based but the model is proven — consistency early is key.",
         "follow": "Is it weekly stability, earning ceiling, or the first few months that worries you most?",
-        "next": "Walk through a realistic first-30-day plan and book territory review."
+        "next": "Walk through a realistic first-30-days plan and book territory review."
     },
     "No Experience": {
         "phone": "Most franchisees start with no experience. Training covers everything and confidence builds quickly once you’re on the tools.",
@@ -49,94 +50,127 @@ PLAYS = {
     },
 }
 
-# --- AI settings ---
-ai_enabled = st.toggle("Enable AI fallback for new objections", value=True)
-model_name = st.text_input("AI model", value="gpt-5.2")
+# ---------------------------
+# Sidebar settings
+# ---------------------------
+with st.sidebar:
+    st.header("Settings")
+    ai_enabled = st.toggle("Enable AI fallback", value=True)
+    model_name = st.text_input("Model", value="gpt-5.2")
+    tone = st.selectbox("Tone", ["Straight-talking (AU)", "More supportive", "More assertive"])
+    st.caption("Tip: Locked scripts always work. AI is optional.")
 
-# Streamlit secrets: OPENAI_API_KEY
-api_key = st.secrets.get("OPENAI_API_KEY", None)
+# ---------------------------
+# Secrets / key handling
+# ---------------------------
+api_key = st.secrets.get("OPENAI_API_KEY", "").strip()
 
-# --- UI ---
-choice = st.selectbox("Select a known objection (locked script):", list(PLAYS.keys()))
+def get_client() -> OpenAI:
+    # OpenAI recommends loading keys from env/secrets, not hard-coding. :contentReference[oaicite:2]{index=2}
+    return OpenAI(api_key=api_key)
+
+# ---------------------------
+# Locked script UI
+# ---------------------------
+st.subheader("✅ Locked scripts")
+choice = st.selectbox("Select a common objection:", list(LOCKED.keys()))
+
+st.markdown("### 📞 Phone")
+st.write(LOCKED[choice]["phone"])
+
+st.markdown("### 💬 SMS")
+st.code(LOCKED[choice]["sms"])
+
+st.markdown("### ❓ Follow-up question")
+st.write(LOCKED[choice]["follow"])
+
+st.markdown("### ➡️ Next step")
+st.write(LOCKED[choice]["next"])
+
 st.divider()
 
-st.subheader("📞 Phone Response (Locked)")
-st.write(PLAYS[choice]["phone"])
+# ---------------------------
+# Key test (so we stop guessing)
+# ---------------------------
+st.subheader("🔑 Key test (recommended)")
+st.caption("This checks whether your OpenAI key is valid from this Streamlit app.")
 
-st.subheader("💬 SMS Version (Locked)")
-st.code(PLAYS[choice]["sms"])
+col1, col2 = st.columns([1, 2])
+with col1:
+    if st.button("Test OpenAI key"):
+        if not api_key:
+            st.error("No OPENAI_API_KEY found in Streamlit Secrets.")
+        else:
+            try:
+                client = get_client()
+                # Calls the Models endpoint; if this 401s, it’s key/org/billing, not your app. :contentReference[oaicite:3]{index=3}
+                client.models.list()
+                st.success("✅ Key is valid and working")
+            except Exception as e:
+                st.error(f"❌ Key test failed: {e}")
 
-st.subheader("❓ Follow-Up Question (Locked)")
-st.write(PLAYS[choice]["follow"])
-
-st.subheader("➡️ Next Step (Locked)")
-st.write(PLAYS[choice]["next"])
+with col2:
+    # Safe, non-sensitive debug
+    st.write("Key loaded:", bool(api_key))
+    st.write("Key prefix:", api_key[:7] if api_key else "")
+    st.write("Key length:", len(api_key))
 
 st.divider()
-st.subheader("🤖 AI Fallback (for anything else)")
 
+# ---------------------------
+# AI fallback UI
+# ---------------------------
+st.subheader("🤖 AI fallback (new/unique objections)")
 objection_text = st.text_area(
-    "Paste/type the prospect’s exact objection here (or any weird/unique objection):",
+    "Paste/type the prospect’s exact objection (anything weird/unusual):",
     placeholder="e.g. 'I’m worried I won’t get enough bookings in my area…'"
 )
 
-tone = st.selectbox("Tone", ["Straight-talking (AU)", "More supportive", "More assertive"])
-format_pref = st.selectbox("Output format", ["Phone + SMS + Follow-up + Next step", "Just SMS", "Just Phone talk track"])
-
-def generate_ai_response(objection: str) -> str:
-    # OpenAI Responses API (recommended for new projects) :contentReference[oaicite:2]{index=2}
-    client = OpenAI(api_key=api_key)
-    system_rules = (
+def ai_response(objection: str, tone_choice: str) -> str:
+    system = (
         "You are a franchise sales objection coach for Jim’s Car Detailing (Australia). "
-        "Write concise, ethical replies. No income guarantees. Keep it confident and practical."
+        "Be concise, confident, and ethical. Do not guarantee income. "
+        "Where relevant, mention outcomes are effort-based."
     )
+    prompt = f"""
+TONE: {tone_choice}
 
-    instructions = f"""
-TONE: {tone}
-
-Given this objection from a franchise prospect:
+Prospect objection:
 \"\"\"{objection}\"\"\"
 
-Return:
-- PHONE TALK TRACK (2–4 sentences)
-- SMS VERSION (1–2 sentences)
-- FOLLOW-UP QUESTION (1 sentence)
-- NEXT STEP (1 line)
-
-Constraints:
-- No hype or guarantees
-- Mention effort-based outcomes where relevant
-- Keep it simple and human
+Return exactly these sections:
+PHONE TALK TRACK (2–4 sentences)
+SMS VERSION (1–2 sentences)
+FOLLOW-UP QUESTION (1 sentence)
+NEXT STEP (1 line)
 """
-
+    client = get_client()
+    # Responses API is recommended for new projects. :contentReference[oaicite:4]{index=4}
     resp = client.responses.create(
         model=model_name,
         input=[
-            {"role": "system", "content": system_rules},
-            {"role": "user", "content": instructions},
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
         ],
     )
     return resp.output_text
 
 if st.button("Generate AI response", type="primary"):
     if not ai_enabled:
-        st.warning("AI fallback is turned OFF. Toggle it on above if you want AI replies.")
+        st.warning("AI fallback is turned OFF in Settings.")
     elif not objection_text.strip():
-        st.warning("Type/paste an objection first.")
+        st.warning("Paste/type an objection first.")
     elif not api_key:
-        st.error("No OPENAI_API_KEY found in Streamlit Secrets. Add it in Settings → Secrets.")
+        st.error("Missing OPENAI_API_KEY in Streamlit Secrets.")
     else:
-        with st.spinner("Generating…"):
-            try:
-                ai_out = generate_ai_response(objection_text.strip())
-                st.subheader("✅ AI Response")
-                if format_pref == "Just SMS":
-                    st.code(ai_out)
-                elif format_pref == "Just Phone talk track":
-                    st.write(ai_out)
-                else:
-                    st.write(ai_out)
-            except Exception as e:
-                st.error(f"AI request failed: {e}")
-
-
+        try:
+            with st.spinner("Generating…"):
+                out = ai_response(objection_text.strip(), tone)
+            st.success("Done")
+            st.write(out)
+        except Exception as e:
+            st.error(f"AI request failed: {e}")
+            st.info(
+                "If this is a 401 invalid_api_key, it’s almost always an OpenAI key/org/billing issue. "
+                "Use the 'Test OpenAI key' button above to confirm."
+            )
